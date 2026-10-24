@@ -1,0 +1,6 @@
+{
+  "name": "TrioBloom 🌷",
+  "description": "A private, aesthetic mobile-first friendship app for four hearts with real-time chat, memory wall, and friendship quizzes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

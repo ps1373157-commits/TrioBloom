@@ -1,0 +1,159 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCoreFriendEmail(email) {
+      return email in [
+        'ps1373157@gmail.com',
+        'palak.bloom@triobloom.app',
+        'priya.bloom@triobloom.app',
+        'hanshika.bloom@triobloom.app'
+      ];
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'ps1373157@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isApprovedMember(uid) {
+      return isSignedIn() && (
+        isAdmin() ||
+        isCoreFriendEmail(request.auth.token.email) ||
+        (exists(/databases/$(database)/documents/members/$(uid)) &&
+         get(/databases/$(database)/documents/members/$(uid)).data.isApproved == true)
+      );
+    }
+
+    function isCurrentApprovedMember() {
+      return isApprovedMember(request.auth.uid);
+    }
+
+    // Admins collection
+    match /admins/{adminId} {
+      allow get, list: if isSignedIn();
+      allow write: if isAdmin() || request.auth.token.email == 'ps1373157@gmail.com';
+    }
+
+    // Members collection
+    match /members/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(userId) && (
+        isAdmin() ||
+        (request.auth.uid == userId && incoming().uid == userId && (
+          (isCoreFriendEmail(request.auth.token.email) && incoming().isApproved == true && incoming().role == (request.auth.token.email == 'ps1373157@gmail.com' ? 'admin' : 'member')) ||
+          (!isCoreFriendEmail(request.auth.token.email) && incoming().isApproved == false && incoming().role == 'member')
+        ))
+      );
+      allow update: if isSignedIn() && isValidId(userId) && (
+        isAdmin() ||
+        (request.auth.uid == userId &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatarUrl', 'flowerTag', 'bio', 'updatedAt']) &&
+         incoming().uid == existing().uid &&
+         incoming().isApproved == existing().isApproved &&
+         incoming().role == existing().role)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Friendship Wall Posts
+    match /wall_posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId) && isCurrentApprovedMember();
+      allow list: if isSignedIn() && isCurrentApprovedMember();
+      allow create: if isSignedIn() && isValidId(postId) && isCurrentApprovedMember() &&
+        incoming().authorId == request.auth.uid &&
+        incoming().likesCount == 0 &&
+        incoming().content is string &&
+        incoming().content.size() >= 1 &&
+        incoming().content.size() <= 2000;
+      allow update: if isSignedIn() && isValidId(postId) && isCurrentApprovedMember() && (
+        // Action 1: Like/heart toggle by approved friend
+        (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy', 'updatedAt']) &&
+         incoming().authorId == existing().authorId &&
+         incoming().content == existing().content &&
+         incoming().likesCount >= 0) ||
+        // Action 2: Author edits own post content
+        (existing().authorId == request.auth.uid &&
+         incoming().authorId == request.auth.uid &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['content', 'flowerSticker', 'updatedAt']) &&
+         incoming().content is string &&
+         incoming().content.size() >= 1 &&
+         incoming().content.size() <= 2000)
+      );
+      allow delete: if isSignedIn() && isValidId(postId) && (existing().authorId == request.auth.uid || isAdmin());
+    }
+
+    // Conversations (Group or Private)
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && (
+        isAdmin() || (request.auth.uid in resource.data.participantIds)
+      );
+      allow list: if isSignedIn() && (
+        isAdmin() || (request.auth.uid in resource.data.participantIds)
+      );
+      allow create: if isSignedIn() && isValidId(conversationId) && isCurrentApprovedMember() && (
+        isAdmin() || (request.auth.uid in incoming().participantIds)
+      );
+      allow update: if isSignedIn() && isValidId(conversationId) && (
+        isAdmin() || (request.auth.uid in existing().participantIds)
+      ) && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageSender', 'lastMessageAt', 'updatedAt']);
+      allow delete: if isAdmin();
+
+      // Nested chat messages
+      match /messages/{messageId} {
+        allow get: if isSignedIn() && isValidId(messageId) && (
+          isAdmin() ||
+          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
+        );
+        allow list: if isSignedIn() && (
+          isAdmin() ||
+          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
+        );
+        allow create: if isSignedIn() && isValidId(messageId) &&
+          (isAdmin() || (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)) &&
+          incoming().senderId == request.auth.uid &&
+          incoming().text is string &&
+          incoming().text.size() >= 1 &&
+          incoming().text.size() <= 1000;
+        allow update: if isSignedIn() && isValidId(messageId) &&
+          (isAdmin() || (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['readBy']);
+        allow delete: if isSignedIn() && isValidId(messageId) && (
+          existing().senderId == request.auth.uid || isAdmin()
+        );
+      }
+    }
+
+    // Quiz Scores
+    match /quiz_scores/{scoreId} {
+      allow get, list: if isSignedIn() && isCurrentApprovedMember();
+      allow create: if isSignedIn() && isValidId(scoreId) && isCurrentApprovedMember() &&
+        incoming().userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "entities": {
+    "Member": {
+      "title": "Member Profile",
+      "description": "User profile for approved friendship circle members",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "maxLength": 128
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Friend's display name",
+          "maxLength": 50,
+          "minLength": 1
+        },
+        "email": {
+          "type": "string",
+          "description": "Friend's email address",
+          "maxLength": 100
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Avatar preset or image identifier",
+          "maxLength": 200
+        },
+        "flowerTag": {
+          "type": "string",
+          "description": "Flower personality badge",
+          "maxLength": 50
+        },
+        "isApproved": {
+          "type": "boolean",
+          "description": "Whether user is approved as one of the 4 friends"
+        },
+        "role": {
+          "type": "string",
+          "description": "Role: admin or member",
+          "enum": ["admin", "member"]
+        },
+        "bio": {
+          "type": "string",
+          "description": "Short friendship motto or bio",
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["uid", "displayName", "email", "isApproved", "role", "createdAt", "updatedAt"]
+    },
+    "WallPost": {
+      "title": "Wall Post",
+      "description": "Shared memory or friendship post on the Friendship Wall",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Post ID",
+          "maxLength": 128
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of post creator",
+          "maxLength": 128
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of author",
+          "maxLength": 50
+        },
+        "authorAvatar": {
+          "type": "string",
+          "description": "Avatar URL or preset of author",
+          "maxLength": 200
+        },
+        "content": {
+          "type": "string",
+          "description": "Post text memory",
+          "maxLength": 2000,
+          "minLength": 1
+        },
+        "flowerSticker": {
+          "type": "string",
+          "description": "Decorative flower sticker tag",
+          "maxLength": 50
+        },
+        "likesCount": {
+          "type": "number",
+          "description": "Total hearts received"
+        },
+        "likedBy": {
+          "type": "array",
+          "description": "List of UIDs who liked this post"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Post creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Post update timestamp"
+        }
+      },
+      "required": ["id", "authorId", "authorName", "content", "likesCount", "createdAt", "updatedAt"]
+    },
+    "Conversation": {
+      "title": "Conversation Channel",
+      "description": "A group or private chat room",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Conversation ID",
+          "maxLength": 128
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of conversation: group or private",
+          "enum": ["group", "private"]
+        },
+        "participantIds": {
+          "type": "array",
+          "description": "Array of user UIDs participating"
+        },
+        "lastMessage": {
+          "type": "string",
+          "description": "Snippet of last message",
+          "maxLength": 500
+        },
+        "lastMessageSender": {
+          "type": "string",
+          "description": "Name of sender of last message",
+          "maxLength": 50
+        },
+        "lastMessageAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of last message"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp"
+        }
+      },
+      "required": ["id", "type", "participantIds", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "A message sent in group or private conversation",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Message ID",
+          "maxLength": 128
+        },
+        "conversationId": {
+          "type": "string",
+          "description": "Parent conversation ID",
+          "maxLength": 128
+        },
+        "senderId": {
+          "type": "string",
+          "description": "UID of sender",
+          "maxLength": 128
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of sender",
+          "maxLength": 50
+        },
+        "senderAvatar": {
+          "type": "string",
+          "description": "Avatar preset or URL",
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "description": "Message content",
+          "maxLength": 1000,
+          "minLength": 1
+        },
+        "readBy": {
+          "type": "array",
+          "description": "List of user UIDs who have seen this message"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Message creation timestamp"
+        }
+      },
+      "required": ["id", "conversationId", "senderId", "senderName", "text", "createdAt"]
+    },
+    "QuizScore": {
+      "title": "Quiz Result",
+      "description": "Quiz completion record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Score record ID",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "User UID",
+          "maxLength": 128
+        },
+        "userName": {
+          "type": "string",
+          "description": "User display name",
+          "maxLength": 50
+        },
+        "score": {
+          "type": "number",
+          "description": "Points scored"
+        },
+        "total": {
+          "type": "number",
+          "description": "Total possible questions"
+        },
+        "flowerPersona": {
+          "type": "string",
+          "description": "Earned friendship flower title",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Quiz submission timestamp"
+        }
+      },
+      "required": ["id", "userId", "score", "total", "flowerPersona", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/members/{userId}": {
+      "schema": "Member",
+      "description": "Approved member profiles and permission state"
+    },
+    "/wall_posts/{postId}": {
+      "schema": "WallPost",
+      "description": "Friendship memories, stories, and reactions"
+    },
+    "/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Group or private conversation metadata and participant list"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Chat messages within a group or 1-on-1 conversation"
+    },
+    "/quiz_scores/{scoreId}": {
+      "schema": "QuizScore",
+      "description": "Saved friendship quiz completions and badges"
+    }
+  }
+}
