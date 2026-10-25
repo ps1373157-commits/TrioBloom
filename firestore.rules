@@ -23,15 +23,7 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isCoreFriendEmail(email) {
-      return email in [
-        'ps1373157@gmail.com',
-        'palak.bloom@triobloom.app',
-        'priya.bloom@triobloom.app',
-        'hanshika.bloom@triobloom.app'
-      ];
-    }
-
+    // Trusted Administrator check: either bootstrapped admin email or verified in admins collection
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'ps1373157@gmail.com' ||
@@ -39,10 +31,10 @@ service cloud.firestore {
       );
     }
 
+    // Approved member check: strictly verified in Firestore members collection with isApproved == true
     function isApprovedMember(uid) {
       return isSignedIn() && (
         isAdmin() ||
-        isCoreFriendEmail(request.auth.token.email) ||
         (exists(/databases/$(database)/documents/members/$(uid)) &&
          get(/databases/$(database)/documents/members/$(uid)).data.isApproved == true)
       );
@@ -52,23 +44,23 @@ service cloud.firestore {
       return isApprovedMember(request.auth.uid);
     }
 
-    // Admins collection
+    // Admins collection: read restricted to authenticated users; write restricted to admin
     match /admins/{adminId} {
-      allow get, list: if isSignedIn();
-      allow write: if isAdmin() || request.auth.token.email == 'ps1373157@gmail.com';
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow write: if request.auth.token.email == 'ps1373157@gmail.com';
     }
 
     // Members collection
     match /members/{userId} {
       allow get: if isSignedIn() && isValidId(userId);
       allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(userId) && (
-        isAdmin() ||
-        (request.auth.uid == userId && incoming().uid == userId && (
-          (isCoreFriendEmail(request.auth.token.email) && incoming().isApproved == true && incoming().role == (request.auth.token.email == 'ps1373157@gmail.com' ? 'admin' : 'member')) ||
-          (!isCoreFriendEmail(request.auth.token.email) && incoming().isApproved == false && incoming().role == 'member')
-        ))
+      // On registration, a user can only create their own member record with isApproved: false and role: 'member'
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && (
+        (request.auth.token.email == 'ps1373157@gmail.com' && incoming().uid == userId && incoming().isApproved == true && incoming().role == 'admin') ||
+        (request.auth.token.email != 'ps1373157@gmail.com' && incoming().uid == userId && incoming().isApproved == false && incoming().role == 'member')
       );
+      // Updates: only the admin can change isApproved or role; regular members can only update profile details
       allow update: if isSignedIn() && isValidId(userId) && (
         isAdmin() ||
         (request.auth.uid == userId &&
@@ -80,18 +72,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Friendship Wall Posts
+    // Friendship Wall Posts: only approved members can read, create, and react
     match /wall_posts/{postId} {
-      allow get: if isSignedIn() && isValidId(postId) && isCurrentApprovedMember();
-      allow list: if isSignedIn() && isCurrentApprovedMember();
+      allow get, list: if isSignedIn() && isCurrentApprovedMember();
       allow create: if isSignedIn() && isValidId(postId) && isCurrentApprovedMember() &&
         incoming().authorId == request.auth.uid &&
         incoming().likesCount == 0 &&
+        incoming().likedBy.size() == 0 &&
         incoming().content is string &&
         incoming().content.size() >= 1 &&
         incoming().content.size() <= 2000;
       allow update: if isSignedIn() && isValidId(postId) && isCurrentApprovedMember() && (
-        // Action 1: Like/heart toggle by approved friend
+        // Action 1: Like/heart toggle by approved member (only affects likesCount, likedBy, updatedAt)
         (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy', 'updatedAt']) &&
          incoming().authorId == existing().authorId &&
          incoming().content == existing().content &&
@@ -107,52 +99,66 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(postId) && (existing().authorId == request.auth.uid || isAdmin());
     }
 
-    // Conversations (Group or Private)
+    // Conversations: Group and Private isolation
     match /conversations/{conversationId} {
-      allow get: if isSignedIn() && isValidId(conversationId) && (
-        isAdmin() || (request.auth.uid in resource.data.participantIds)
+      // Group conversation
+      allow get: if isSignedIn() && (
+        (conversationId == 'group_triobloom' && isCurrentApprovedMember()) ||
+        (conversationId != 'group_triobloom' && request.auth.uid in resource.data.participantIds) ||
+        isAdmin()
       );
       allow list: if isSignedIn() && (
-        isAdmin() || (request.auth.uid in resource.data.participantIds)
+        isAdmin() ||
+        (resource.data.type == 'group' && isCurrentApprovedMember()) ||
+        (resource.data.type == 'private' && request.auth.uid in resource.data.participantIds)
       );
       allow create: if isSignedIn() && isValidId(conversationId) && isCurrentApprovedMember() && (
-        isAdmin() || (request.auth.uid in incoming().participantIds)
+        (conversationId == 'group_triobloom' && incoming().type == 'group') ||
+        (conversationId != 'group_triobloom' && incoming().type == 'private' &&
+         incoming().participantIds.size() == 2 &&
+         request.auth.uid in incoming().participantIds)
       );
       allow update: if isSignedIn() && isValidId(conversationId) && (
-        isAdmin() || (request.auth.uid in existing().participantIds)
+        isAdmin() ||
+        (conversationId == 'group_triobloom' && isCurrentApprovedMember()) ||
+        (conversationId != 'group_triobloom' && request.auth.uid in existing().participantIds)
       ) && incoming().diff(existing()).affectedKeys().hasOnly(['lastMessage', 'lastMessageSender', 'lastMessageAt', 'updatedAt']);
       allow delete: if isAdmin();
 
-      // Nested chat messages
+      // Nested chat messages: strictly isolated to conversation members
       match /messages/{messageId} {
-        allow get: if isSignedIn() && isValidId(messageId) && (
+        allow get, list: if isSignedIn() && isValidId(messageId) && (
           isAdmin() ||
-          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
-        );
-        allow list: if isSignedIn() && (
-          isAdmin() ||
-          (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
+          (conversationId == 'group_triobloom' && isCurrentApprovedMember()) ||
+          (conversationId != 'group_triobloom' && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
         );
         allow create: if isSignedIn() && isValidId(messageId) &&
-          (isAdmin() || (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)) &&
           incoming().senderId == request.auth.uid &&
           incoming().text is string &&
           incoming().text.size() >= 1 &&
-          incoming().text.size() <= 1000;
+          incoming().text.size() <= 1000 && (
+            (conversationId == 'group_triobloom' && isCurrentApprovedMember()) ||
+            (conversationId != 'group_triobloom' && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
+          );
         allow update: if isSignedIn() && isValidId(messageId) &&
-          (isAdmin() || (request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['readBy']);
+          incoming().diff(existing()).affectedKeys().hasOnly(['readBy']) && (
+            isAdmin() ||
+            (conversationId == 'group_triobloom' && isCurrentApprovedMember()) ||
+            (conversationId != 'group_triobloom' && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
+          );
         allow delete: if isSignedIn() && isValidId(messageId) && (
           existing().senderId == request.auth.uid || isAdmin()
         );
       }
     }
 
-    // Quiz Scores
+    // Quiz Scores: only approved members can read and create; user ID must match auth UID
     match /quiz_scores/{scoreId} {
       allow get, list: if isSignedIn() && isCurrentApprovedMember();
       allow create: if isSignedIn() && isValidId(scoreId) && isCurrentApprovedMember() &&
-        incoming().userId == request.auth.uid;
+        incoming().userId == request.auth.uid &&
+        incoming().score is number &&
+        incoming().total is number;
       allow update, delete: if isAdmin();
     }
   }

@@ -12,10 +12,10 @@ import {
 } from 'firebase/auth';
 import {
   doc,
-  getDoc,
   setDoc,
   onSnapshot,
-  serverTimestamp
+  serverTimestamp,
+  updateDoc
 } from 'firebase/firestore';
 import {
   auth,
@@ -25,10 +25,6 @@ import {
   handleFirestoreError,
   OperationType
 } from '../services/firebase';
-import { FOUR_FRIENDS, FriendPreset } from '../constants/friends';
-import { isUserApproved } from '../utils/friendship';
-
-const FRIEND_PASSWORD = 'TrioBloom!4Hearts';
 
 interface AuthContextType {
   user: User | null;
@@ -36,18 +32,15 @@ interface AuthContextType {
   isApproved: boolean;
   isAdmin: boolean;
   loading: boolean;
-  isDemoMode: boolean;
   authError: string | null;
-  activeFriend: FriendPreset;
+  clearAuthError: () => void;
   login: (email: string, pass: string) => Promise<void>;
-  register: (email: string, pass: string, name: string) => Promise<void>;
+  register: (email: string, pass: string, name: string, flowerTag?: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
-  signInAsFriend: (friend: FriendPreset) => Promise<void>;
-  enterDemoMode: (friend: FriendPreset) => void;
-  switchFriendIdentity: (friend: FriendPreset) => void;
   updateMemberProfile: (updates: Partial<MemberProfile>) => Promise<void>;
+  adminSetMemberApproval: (uid: string, isApproved: boolean, role?: 'admin' | 'member') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -56,26 +49,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [member, setMember] = useState<MemberProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [activeFriend, setActiveFriend] = useState<FriendPreset>(FOUR_FRIENDS[3]);
 
   // Test connection on boot
   useEffect(() => {
     testConnection();
   }, []);
 
-  // Listen to Firebase Auth state
+  // Listen to real Firebase Auth state
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
-      if (firebaseUser) {
-        setIsDemoMode(false);
-        const matched = FOUR_FRIENDS.find(f => f.email.toLowerCase() === firebaseUser.email?.toLowerCase());
-        if (matched) {
-          setActiveFriend(matched);
-        }
+      setAuthError(null);
 
+      if (firebaseUser) {
+        // Real-time listener on the authenticated user's member document
         const memberRef = doc(db, 'members', firebaseUser.uid);
         const unsubMember = onSnapshot(
           memberRef,
@@ -83,32 +71,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (snapshot.exists()) {
               setMember(snapshot.data() as MemberProfile);
             } else {
+              // Self-healing: if member document does not exist yet (e.g. from Google Auth or first login)
               const isAdminEmail = firebaseUser.email === 'ps1373157@gmail.com';
-              const isMatchedFriend = FOUR_FRIENDS.some(f => f.email.toLowerCase() === firebaseUser.email?.toLowerCase());
-              const defaultProfile: MemberProfile = {
+              const initialProfile: MemberProfile = {
                 uid: firebaseUser.uid,
-                displayName: firebaseUser.displayName || matched?.name || 'Friend',
+                displayName: firebaseUser.displayName || 'Flower Friend',
                 email: firebaseUser.email || '',
-                avatarUrl: matched?.avatarBg || 'bg-pink-100 text-pink-600 border-pink-300',
-                flowerTag: matched?.flowerTitle || 'Blossom Flower',
-                isApproved: isAdminEmail || isMatchedFriend,
+                avatarUrl: 'bg-pink-100 text-pink-600 border-pink-300',
+                flowerTag: 'Blooming Petal',
+                isApproved: isAdminEmail, // Only the verified project administrator is auto-approved
                 role: isAdminEmail ? 'admin' : 'member',
-                bio: matched?.bio || 'Blooming together in our private sanctuary 🌷',
+                bio: 'Awaiting blooms in our private friendship circle 🌷',
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp()
               };
 
               try {
-                await setDoc(memberRef, defaultProfile);
-                setMember(defaultProfile);
+                await setDoc(memberRef, initialProfile);
+                setMember(initialProfile);
               } catch (err) {
-                console.warn('Error seeding member profile:', err);
+                console.error('Failed to create member profile document:', err);
               }
             }
             setLoading(false);
           },
           (error) => {
-            console.warn('Member profile listener note:', error.message);
+            console.error('Member profile listener error:', error.message);
             setLoading(false);
           }
         );
@@ -123,135 +111,179 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribeAuth();
   }, []);
 
+  const clearAuthError = () => {
+    setAuthError(null);
+  };
+
+  // Real Email/Password login
   const login = async (email: string, pass: string) => {
     setAuthError(null);
-    await signInWithEmailAndPassword(auth, email, pass);
-  };
-
-  const register = async (email: string, pass: string, name: string) => {
-    setAuthError(null);
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    await updateProfile(cred.user, { displayName: name });
-    const matched = FOUR_FRIENDS.find(f => f.email.toLowerCase() === email.toLowerCase());
-    const isAdminEmail = email === 'ps1373157@gmail.com';
-    const isMatched = Boolean(matched);
-
-    const newProfile: MemberProfile = {
-      uid: cred.user.uid,
-      displayName: name,
-      email,
-      avatarUrl: matched?.avatarBg || 'bg-pink-100 text-pink-600 border-pink-300',
-      flowerTag: matched?.flowerTitle || 'Blossom Flower',
-      isApproved: isAdminEmail || isMatched,
-      role: isAdminEmail ? 'admin' : 'member',
-      bio: matched?.bio || 'Blooming together in our private sanctuary 🌷',
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    };
-
     try {
-      await setDoc(doc(db, 'members', cred.user.uid), newProfile);
-      setMember(newProfile);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `members/${cred.user.uid}`);
-    }
-  };
-
-  const loginWithGoogle = async () => {
-    setAuthError(null);
-    const provider = new GoogleAuthProvider();
-    await signInWithPopup(auth, provider);
-  };
-
-  const logout = async () => {
-    setIsDemoMode(false);
-    await firebaseSignOut(auth);
-  };
-
-  const resetPassword = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
-  };
-
-  const enterDemoMode = (friend: FriendPreset) => {
-    setActiveFriend(friend);
-    setIsDemoMode(true);
-    setMember({
-      uid: friend.id,
-      displayName: friend.name,
-      email: friend.email,
-      avatarUrl: friend.avatarBg,
-      flowerTag: friend.flowerTitle,
-      isApproved: true,
-      role: friend.role,
-      bio: friend.bio,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    });
-  };
-
-  // Sign in as one of the four friends
-  const signInAsFriend = async (friend: FriendPreset) => {
-    setAuthError(null);
-    setActiveFriend(friend);
-
-    try {
-      await signInWithEmailAndPassword(auth, friend.email, FRIEND_PASSWORD);
+      await signInWithEmailAndPassword(auth, email.trim(), pass);
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        try {
-          const cred = await createUserWithEmailAndPassword(auth, friend.email, FRIEND_PASSWORD);
-          await updateProfile(cred.user, { displayName: friend.name });
-          const isAdmin = friend.email === 'ps1373157@gmail.com';
-
-          const newProfile: MemberProfile = {
-            uid: cred.user.uid,
-            displayName: friend.name,
-            email: friend.email,
-            avatarUrl: friend.avatarBg,
-            flowerTag: friend.flowerTitle,
-            isApproved: true,
-            role: isAdmin ? 'admin' : 'member',
-            bio: friend.bio,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          };
-
-          await setDoc(doc(db, 'members', cred.user.uid), newProfile);
-          setMember(newProfile);
-        } catch (createErr: any) {
-          console.warn('Could not create Firebase account, falling back to Interactive Mode:', createErr.message);
-          enterDemoMode(friend);
-        }
+      console.error('Login error:', err);
+      let message = 'Failed to sign in. Please check your credentials.';
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        message = 'Invalid email or password.';
+      } else if (err.code === 'auth/user-not-found') {
+        message = 'No account found with this email.';
+      } else if (err.code === 'auth/too-many-requests') {
+        message = 'Too many attempts. Please try again later.';
       } else if (err.code === 'auth/operation-not-allowed') {
-        // Email/password not enabled in Firebase Console yet, enter Interactive Mode!
-        enterDemoMode(friend);
-      } else {
-        setAuthError(err.message || 'Authentication error.');
-        enterDemoMode(friend);
+        message = 'Email/Password sign-in is disabled in Firebase Console. Please enable it in Authentication > Sign-in method.';
+      } else if (err.message) {
+        message = err.message;
       }
+      setAuthError(message);
+      throw new Error(message);
     }
   };
 
-  const updateMemberProfile = async (updates: Partial<MemberProfile>) => {
-    const targetUid = user?.uid;
-    if (targetUid) {
-      const memberRef = doc(db, 'members', targetUid);
-      const updatedData = {
-        ...updates,
+  // Real Email/Password registration
+  const register = async (email: string, pass: string, name: string, flowerTag?: string) => {
+    setAuthError(null);
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email.trim(), pass);
+      await updateProfile(cred.user, { displayName: name.trim() });
+
+      const isAdminEmail = email.trim().toLowerCase() === 'ps1373157@gmail.com';
+      const newProfile: MemberProfile = {
+        uid: cred.user.uid,
+        displayName: name.trim(),
+        email: email.trim(),
+        avatarUrl: 'bg-pink-100 text-pink-600 border-pink-300',
+        flowerTag: flowerTag || 'Blooming Petal',
+        isApproved: isAdminEmail, // Only the administrator is auto-approved; all other members require approval
+        role: isAdminEmail ? 'admin' : 'member',
+        bio: 'Blooming in our private sanctuary 🌷',
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       };
 
-      try {
-        await setDoc(memberRef, updatedData, { merge: true });
-      } catch (err) {
-        console.warn('Firestore update warning:', err);
+      await setDoc(doc(db, 'members', cred.user.uid), newProfile);
+      setMember(newProfile);
+    } catch (err: any) {
+      console.error('Registration error:', err);
+      let message = 'Failed to create account.';
+      if (err.code === 'auth/email-already-in-use') {
+        message = 'An account with this email already exists. Please sign in.';
+      } else if (err.code === 'auth/weak-password') {
+        message = 'Password must be at least 6 characters.';
+      } else if (err.code === 'auth/invalid-email') {
+        message = 'Please enter a valid email address.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        message = 'Email/Password registration is disabled in Firebase Console. Please enable it under Authentication > Sign-in method.';
+      } else if (err.message) {
+        message = err.message;
       }
+      setAuthError(message);
+      throw new Error(message);
     }
-    setMember(prev => prev ? { ...prev, ...updates } : null);
   };
 
-  const isApproved = isDemoMode || isUserApproved(member, user?.email || activeFriend.email);
-  const isAdmin = user?.email === 'ps1373157@gmail.com' || member?.role === 'admin' || activeFriend.role === 'admin';
+  // Real Google Sign-in with popup
+  const loginWithGoogle = async () => {
+    setAuthError(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      console.error('Google sign-in error:', err);
+      let message = 'Google sign-in was cancelled or failed.';
+      if (err.code === 'auth/network-request-failed') {
+        message = 'Network request to Google Auth failed. This is typically caused by an ad-blocker (such as uBlock Origin or Brave Shields) blocking identitytoolkit.googleapis.com, or an interrupted network connection. Please pause ad-blockers for this preview tab and retry.';
+      } else if (err.code === 'auth/popup-closed-by-user') {
+        message = 'The Google sign-in window was closed before finishing. Please try again.';
+      } else if (err.code === 'auth/popup-blocked') {
+        message = 'Your browser blocked the sign-in pop-up window. Please allow pop-ups for this site and retry.';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        message = 'This preview domain is not yet authorized in Firebase. Please add this domain under Firebase Console > Authentication > Settings > Authorized domains.';
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        message = 'Sign-in was cancelled because another sign-in window was opened.';
+      } else if (err.message) {
+        message = err.message;
+      }
+      setAuthError(message);
+      throw new Error(message);
+    }
+  };
+
+  // Real Sign Out
+  const logout = async () => {
+    setAuthError(null);
+    await firebaseSignOut(auth);
+    setMember(null);
+  };
+
+  // Real Password Reset
+  const resetPassword = async (email: string) => {
+    setAuthError(null);
+    try {
+      await sendPasswordResetEmail(auth, email.trim());
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      let message = 'Could not send reset email.';
+      if (err.code === 'auth/user-not-found') {
+        message = 'No account exists with this email address.';
+      } else if (err.message) {
+        message = err.message;
+      }
+      setAuthError(message);
+      throw new Error(message);
+    }
+  };
+
+  // Update own member profile (only permitted fields)
+  const updateMemberProfile = async (updates: Partial<MemberProfile>) => {
+    if (!user) throw new Error('Must be signed in to update profile');
+
+    const memberRef = doc(db, 'members', user.uid);
+    // Whitelist only allowed fields to prevent client-side privilege escalation
+    const safeUpdates: Record<string, any> = {
+      updatedAt: serverTimestamp()
+    };
+    if (updates.displayName !== undefined) safeUpdates.displayName = updates.displayName.slice(0, 50);
+    if (updates.avatarUrl !== undefined) safeUpdates.avatarUrl = updates.avatarUrl.slice(0, 200);
+    if (updates.flowerTag !== undefined) safeUpdates.flowerTag = updates.flowerTag.slice(0, 50);
+    if (updates.bio !== undefined) safeUpdates.bio = updates.bio.slice(0, 200);
+
+    try {
+      await updateDoc(memberRef, safeUpdates);
+      setMember((prev) => (prev ? { ...prev, ...updates } : null));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `members/${user.uid}`);
+    }
+  };
+
+  // Administrator approval of circle members
+  const adminSetMemberApproval = async (
+    targetUid: string,
+    isApprovedStatus: boolean,
+    role: 'admin' | 'member' = 'member'
+  ) => {
+    const isAdminUser = user?.email === 'ps1373157@gmail.com' || member?.role === 'admin';
+    if (!isAdminUser) {
+      throw new Error('Unauthorized: Only administrators can approve members.');
+    }
+
+    const memberRef = doc(db, 'members', targetUid);
+    try {
+      await updateDoc(memberRef, {
+        isApproved: isApprovedStatus,
+        role,
+        updatedAt: serverTimestamp()
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `members/${targetUid}`);
+    }
+  };
+
+  // Security derivation: isApproved and isAdmin are strictly derived from real state
+  const isAdmin = user?.email === 'ps1373157@gmail.com' || member?.role === 'admin';
+  const isApproved = Boolean(member?.isApproved) || isAdmin;
 
   return (
     <AuthContext.Provider
@@ -261,18 +293,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isApproved,
         isAdmin,
         loading,
-        isDemoMode,
         authError,
-        activeFriend,
+        clearAuthError,
         login,
         register,
         loginWithGoogle,
         logout,
         resetPassword,
-        signInAsFriend,
-        enterDemoMode,
-        switchFriendIdentity: enterDemoMode,
-        updateMemberProfile
+        updateMemberProfile,
+        adminSetMemberApproval
       }}
     >
       {children}

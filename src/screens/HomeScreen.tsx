@@ -1,18 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { FOUR_FRIENDS, FriendPreset } from '../constants/friends';
-import { Sparkles, MessageCircleHeart, HelpCircle, Heart, ArrowRight, MessageSquare, Flower2 } from 'lucide-react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db, WallPostItem, ChatMessageItem } from '../services/firebase';
+import { Sparkles, MessageCircleHeart, HelpCircle, ArrowRight, Flower2, Users } from 'lucide-react';
+import { collection, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
+import { db, WallPostItem, ChatMessageItem, MemberProfile } from '../services/firebase';
 import { formatFriendlyTime } from '../utils/friendship';
 import { NavTab } from '../components/Navigation';
 
 interface HomeScreenProps {
-  onNavigate: (tab: NavTab, friendTarget?: FriendPreset) => void;
+  onNavigate: (tab: NavTab, targetMember?: MemberProfile) => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
-  const { member, activeFriend } = useAuth();
+  const { member, user } = useAuth();
+  const [approvedMembers, setApprovedMembers] = useState<MemberProfile[]>([]);
   const [latestPost, setLatestPost] = useState<WallPostItem | null>(null);
   const [latestMessage, setLatestMessage] = useState<ChatMessageItem | null>(null);
 
@@ -24,34 +24,66 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
     return 'Good evening, lovely soul! 🌙';
   };
 
+  // Real-time listener for approved circle members
+  useEffect(() => {
+    try {
+      const qMembers = query(collection(db, 'members'), where('isApproved', '==', true));
+      const unsubMembers = onSnapshot(
+        qMembers,
+        (snapshot) => {
+          const list: MemberProfile[] = [];
+          snapshot.forEach((snap) => {
+            list.push(snap.data() as MemberProfile);
+          });
+          setApprovedMembers(list);
+        },
+        (err) => {
+          console.warn('Members listener note:', err.message);
+        }
+      );
+
+      return () => unsubMembers();
+    } catch (e) {
+      console.warn('Members query note:', e);
+    }
+  }, []);
+
   // Fetch real latest activity from Firestore
   useEffect(() => {
-    // Latest wall post
     try {
+      // Latest wall post
       const qPosts = query(collection(db, 'wall_posts'), orderBy('createdAt', 'desc'), limit(1));
-      const unsubPosts = onSnapshot(qPosts, (snapshot) => {
-        if (!snapshot.empty) {
-          const docData = snapshot.docs[0].data();
-          setLatestPost({ id: snapshot.docs[0].id, ...docData } as WallPostItem);
-        } else {
-          setLatestPost(null);
+      const unsubPosts = onSnapshot(
+        qPosts,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const docData = snapshot.docs[0].data();
+            setLatestPost({ id: snapshot.docs[0].id, ...docData } as WallPostItem);
+          } else {
+            setLatestPost(null);
+          }
+        },
+        (err) => {
+          console.warn('Real-time post listener note:', err.message);
         }
-      }, (err) => {
-        console.warn('Real-time post listener note:', err.message);
-      });
+      );
 
       // Latest group chat message
       const qMsg = query(collection(db, 'conversations/group_triobloom/messages'), orderBy('createdAt', 'desc'), limit(1));
-      const unsubMsg = onSnapshot(qMsg, (snapshot) => {
-        if (!snapshot.empty) {
-          const docData = snapshot.docs[0].data();
-          setLatestMessage({ id: snapshot.docs[0].id, ...docData } as ChatMessageItem);
-        } else {
-          setLatestMessage(null);
+      const unsubMsg = onSnapshot(
+        qMsg,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const docData = snapshot.docs[0].data();
+            setLatestMessage({ id: snapshot.docs[0].id, ...docData } as ChatMessageItem);
+          } else {
+            setLatestMessage(null);
+          }
+        },
+        (err) => {
+          console.warn('Real-time message listener note:', err.message);
         }
-      }, (err) => {
-        console.warn('Real-time message listener note:', err.message);
-      });
+      );
 
       return () => {
         unsubPosts();
@@ -62,7 +94,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
     }
   }, []);
 
-  const currentName = member?.displayName || activeFriend.name;
+  const currentDisplayName = member?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Friend';
 
   return (
     <div className="space-y-4 pb-6">
@@ -79,7 +111,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
             {getGreeting()}
           </h2>
           <p className="text-xs text-[#927F8C] mt-1">
-            Hi <span className="font-semibold text-[#C44780]">{currentName}</span>, all 4 besties are blooming together today.
+            Hi <span className="font-semibold text-[#C44780]">{currentDisplayName}</span>, our friendship sanctuary is blooming with warmth.
           </p>
         </div>
       </div>
@@ -94,91 +126,119 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
             </h3>
           </div>
           <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#FFE5EF] text-[#C44780]">
-            4 Hearts Intertwined
+            Four Hearts, One Story
           </span>
         </div>
         <p className="text-xs text-[#927F8C] leading-relaxed">
-          Palak, Priya, Hanshika, and You. Through midnight calls, belly laughs, exam stress, and coffee dates — one unbreakable story.
+          Through late night calls, belly laughs, exam stress, and coffee dates — a private space just for the four of us.
         </p>
 
-        {/* Mini stats row */}
+        {/* Real circle stats */}
         <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-[#F7EDF3]">
           <div className="bg-[#FFF8F5] rounded-2xl p-2 text-center">
-            <span className="text-xs font-bold text-[#C44780]">4</span>
-            <p className="text-[10px] text-[#927F8C] font-medium">Soulmates</p>
+            <span className="text-xs font-bold text-[#C44780]">{approvedMembers.length} / 4</span>
+            <p className="text-[10px] text-[#927F8C] font-medium">Bloomed Friends</p>
+          </div>
+          <div className="bg-[#FFF8F5] rounded-2xl p-2 text-center">
+            <span className="text-xs font-bold text-[#C44780]">Private</span>
+            <p className="text-[10px] text-[#927F8C] font-medium">Access Tier</p>
           </div>
           <div className="bg-[#FFF8F5] rounded-2xl p-2 text-center">
             <span className="text-xs font-bold text-[#C44780]">Infinite</span>
-            <p className="text-[10px] text-[#927F8C] font-medium">Inside Jokes</p>
-          </div>
-          <div className="bg-[#FFF8F5] rounded-2xl p-2 text-center">
-            <span className="text-xs font-bold text-[#C44780]">Forever</span>
-            <p className="text-[10px] text-[#927F8C] font-medium">Unbreakable</p>
+            <p className="text-[10px] text-[#927F8C] font-medium">Memories</p>
           </div>
         </div>
       </div>
 
-      {/* The 4 Friendship Cards */}
+      {/* Our Circle of Four Petals */}
       <div>
         <div className="flex items-center justify-between mb-2.5 px-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-[#927F8C]">
             Our Four Petals 🌸
           </h3>
-          <span className="text-[11px] text-[#C44780] font-medium">Tap to whisper</span>
+          <span className="text-[11px] text-[#C44780] font-medium">
+            {approvedMembers.length} Approved
+          </span>
         </div>
 
-        <div className="grid grid-cols-2 gap-2.5">
-          {FOUR_FRIENDS.map((friend) => {
-            const isMe = friend.email.toLowerCase() === (member?.email || activeFriend.email).toLowerCase();
-            return (
-              <div
-                key={friend.id}
-                className={`bg-white rounded-2xl p-3 border ${friend.colorBorder} shadow-xs hover:shadow-soft transition-all relative flex flex-col justify-between`}
-              >
-                <div>
-                  <div className="flex items-start justify-between">
-                    <div
-                      className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm border ${friend.avatarBg}`}
-                    >
-                      {friend.avatarText}
-                    </div>
-                    <span className="text-base select-none">{friend.flowerEmoji}</span>
-                  </div>
+        {approvedMembers.length > 0 ? (
+          <div className="grid grid-cols-2 gap-2.5">
+            {approvedMembers.map((m) => {
+              const isMe = m.uid === user?.uid;
+              const letter = m.displayName ? m.displayName[0].toUpperCase() : '🌸';
 
-                  <div className="mt-2">
-                    <div className="flex items-center space-x-1">
-                      <h4 className="text-sm font-bold text-[#493744]">
-                        {friend.name}
-                      </h4>
-                      {isMe && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.2 bg-[#FFE5EF] text-[#C44780] rounded-full">
-                          You
-                        </span>
-                      )}
+              return (
+                <div
+                  key={m.uid}
+                  className="bg-white rounded-2xl p-3 border border-[#F3E6EE] shadow-xs hover:shadow-soft transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between">
+                      <div
+                        className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm border ${
+                          m.avatarUrl || 'bg-pink-100 text-pink-600 border-pink-300'
+                        }`}
+                      >
+                        {letter}
+                      </div>
+                      <span className="text-base select-none">🌸</span>
                     </div>
-                    <p className="text-[10px] text-[#C44780] font-medium leading-none mt-0.5">
-                      {friend.flowerTitle}
+
+                    <div className="mt-2">
+                      <div className="flex items-center space-x-1">
+                        <h4 className="text-sm font-bold text-[#493744] truncate">
+                          {m.displayName}
+                        </h4>
+                        {isMe && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 bg-[#FFE5EF] text-[#C44780] rounded-full shrink-0">
+                            You
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-[#C44780] font-medium leading-none mt-0.5 truncate">
+                        {m.flowerTag || 'Petal'}
+                      </p>
+                    </div>
+
+                    <p className="text-[11px] text-[#927F8C] line-clamp-2 mt-1.5 leading-snug">
+                      {m.bio || 'Blooming together in our private sanctuary ✨'}
                     </p>
                   </div>
 
-                  <p className="text-[11px] text-[#927F8C] line-clamp-2 mt-1.5 leading-snug">
-                    {friend.status}
-                  </p>
+                  <div className="mt-3 pt-2 border-t border-[#F7EDF3]">
+                    <button
+                      onClick={() => onNavigate('chat', isMe ? undefined : m)}
+                      className="w-full py-1.5 px-2 bg-[#FFF8F5] hover:bg-[#FFE5EF] text-[#C44780] rounded-xl text-[11px] font-semibold flex items-center justify-center space-x-1 transition-colors"
+                    >
+                      <span>{isMe ? 'Open My Chat' : `Chat with ${m.displayName}`}</span>
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
                 </div>
+              );
+            })}
 
-                <div className="mt-3 pt-2 border-t border-[#F7EDF3]">
-                  <button
-                    onClick={() => onNavigate('chat', friend)}
-                    className="w-full py-1.5 px-2 bg-[#FFF8F5] hover:bg-[#FFE5EF] text-[#C44780] rounded-xl text-[11px] font-semibold flex items-center justify-center space-x-1 transition-colors"
-                  >
-                    <span>{isMe ? 'Open My Chat' : `Chat with ${friend.name}`}</span>
-                    <ArrowRight size={12} />
-                  </button>
+            {/* Display empty slots if fewer than 4 friends joined yet */}
+            {Array.from({ length: Math.max(0, 4 - approvedMembers.length) }).map((_, idx) => (
+              <div
+                key={`empty-slot-${idx}`}
+                className="bg-white/60 rounded-2xl p-3 border border-dashed border-[#F3E6EE] flex flex-col items-center justify-center text-center py-6 space-y-1.5"
+              >
+                <div className="w-9 h-9 rounded-2xl bg-[#FFF8F5] border border-[#F3E6EE] flex items-center justify-center text-lg text-[#927F8C]">
+                  🌱
                 </div>
+                <p className="text-xs font-bold text-[#927F8C]">Friend Slot {approvedMembers.length + idx + 1}</p>
+                <p className="text-[10px] text-[#927F8C]/80">Awaiting Registration & Approval</p>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 bg-white rounded-3xl border border-[#F3E6EE] text-center space-y-1">
+            <span className="text-2xl">🌱</span>
+            <p className="text-xs font-bold text-[#493744]">Connecting our private circle...</p>
+            <p className="text-[11px] text-[#927F8C]">Approved members will appear here automatically.</p>
+          </div>
+        )}
       </div>
 
       {/* Quick Access Actions Grid */}
@@ -235,7 +295,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
             </div>
             <div>
               <p className="text-xs font-bold text-[#493744]">Friend Sanctum</p>
-              <p className="text-[10px] text-[#927F8C]">Profiles & statuses</p>
+              <p className="text-[10px] text-[#927F8C]">Profiles & admin</p>
             </div>
           </button>
         </div>

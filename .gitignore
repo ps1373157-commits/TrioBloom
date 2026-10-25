@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Android & Capacitor build artifacts & keys
+android/app/build/
+android/.gradle/
+android/captures/
+*.keystore
+*.jks
+google-services.json

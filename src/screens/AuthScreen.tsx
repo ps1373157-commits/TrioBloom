@@ -1,61 +1,70 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { FOUR_FRIENDS, FriendPreset } from '../constants/friends';
-import { Lock, Mail, User, Sparkles, Heart, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User, AlertCircle, CheckCircle, ArrowRight, ShieldCheck, Flower2 } from 'lucide-react';
+
+const FLOWER_CHOICES = [
+  { id: 'Cherry Blossom', label: 'Cherry Blossom 🌸', style: 'bg-pink-100 text-pink-600 border-pink-300' },
+  { id: 'Lavender Orchid', label: 'Lavender Orchid 💜', style: 'bg-purple-100 text-purple-600 border-purple-300' },
+  { id: 'Buttercup Peony', label: 'Buttercup Peony 🌼', style: 'bg-amber-100 text-amber-600 border-amber-300' },
+  { id: 'Blooming Tulip', label: 'Blooming Tulip 🌷', style: 'bg-rose-100 text-rose-600 border-rose-300' },
+];
 
 export const AuthScreen: React.FC = () => {
-  const { login, register, resetPassword, signInAsFriend, authError } = useAuth();
-  const [tab, setTab] = useState<'friends' | 'custom'>('friends');
-  const [customMode, setCustomMode] = useState<'login' | 'register'>('login');
+  const { login, register, loginWithGoogle, resetPassword, authError, clearAuthError } = useAuth();
+  const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
 
   const [name, setName] = useState<string>('');
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [selectedFlower, setSelectedFlower] = useState<string>(FLOWER_CHOICES[0].id);
+  const [emailLoading, setEmailLoading] = useState<boolean>(false);
+  const [googleLoading, setGoogleLoading] = useState<boolean>(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  const handleCustomSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg(null);
-    setInfoMsg(null);
-    setLoading(true);
+    setLocalError(null);
+    setInfoMessage(null);
+    clearAuthError();
+    setEmailLoading(true);
 
     try {
-      if (customMode === 'login') {
-        await login(email.trim(), password);
-      } else {
+      if (mode === 'login') {
+        await login(email, password);
+      } else if (mode === 'register') {
         if (!name.trim()) {
-          setErrorMsg('Please enter your name 🌸');
-          setLoading(false);
+          setLocalError('Please enter your name 🌸');
+          setEmailLoading(false);
           return;
         }
-        await register(email.trim(), password, name.trim());
+        await register(email, password, name.trim(), selectedFlower);
+      } else if (mode === 'reset') {
+        await resetPassword(email);
+        setInfoMessage('Password reset email sent! Please check your inbox 🌷');
       }
     } catch (err: any) {
-      let msg = err.message || 'Authentication error';
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        msg = 'Incorrect email or password.';
-      } else if (err.code === 'auth/email-already-in-use') {
-        msg = 'This email is already registered. Please sign in!';
-      }
-      setErrorMsg(msg);
+      setLocalError(err.message || 'Authentication error.');
     } finally {
-      setLoading(false);
+      setEmailLoading(false);
     }
   };
 
-  const handleFriendClick = async (friend: FriendPreset) => {
-    setLoading(true);
-    setErrorMsg(null);
+  const handleGoogleSignIn = async () => {
+    setLocalError(null);
+    setInfoMessage(null);
+    clearAuthError();
+    setGoogleLoading(true);
     try {
-      await signInAsFriend(friend);
+      await loginWithGoogle();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to authenticate friend');
+      setLocalError(err.message || 'Google sign-in was cancelled or failed.');
     } finally {
-      setLoading(false);
+      setGoogleLoading(false);
     }
   };
+
+  const displayError = localError || authError;
 
   return (
     <div className="min-h-screen bg-[#FFF8F5] flex flex-col justify-center px-4 py-8">
@@ -73,155 +82,143 @@ export const AuthScreen: React.FC = () => {
               “Four hearts, one story.”
             </p>
             <p className="text-[11px] text-[#927F8C] max-w-xs mx-auto mt-1">
-              A private, aesthetic sanctuary for Palak, Priya, Hanshika, and You.
+              Private, aesthetic sanctuary for our four besties.
             </p>
           </div>
         </div>
 
-        {/* Tab Switcher */}
+        {/* Auth Mode Toggle */}
         <div className="grid grid-cols-2 gap-1.5 bg-[#FFF0F6] p-1.5 rounded-2xl border border-[#FFD2E4]">
           <button
-            onClick={() => { setTab('friends'); setErrorMsg(null); }}
-            className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-1.5 ${
-              tab === 'friends'
+            onClick={() => {
+              setMode('login');
+              setLocalError(null);
+              setInfoMessage(null);
+              clearAuthError();
+            }}
+            className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              mode === 'login'
                 ? 'bg-[#C44780] text-white shadow-xs'
                 : 'text-[#927F8C] hover:text-[#493744]'
             }`}
           >
-            <span>Our 4 Friends 🌸</span>
+            Sign In 🌸
           </button>
           <button
-            onClick={() => { setTab('custom'); setErrorMsg(null); }}
-            className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-1.5 ${
-              tab === 'custom'
+            onClick={() => {
+              setMode('register');
+              setLocalError(null);
+              setInfoMessage(null);
+              clearAuthError();
+            }}
+            className={`py-2 text-xs font-bold rounded-xl transition-all ${
+              mode === 'register'
                 ? 'bg-[#C44780] text-white shadow-xs'
                 : 'text-[#927F8C] hover:text-[#493744]'
             }`}
           >
-            <span>Email Sign In 💌</span>
+            Join Circle 💌
           </button>
         </div>
 
-        {/* Tab 1: Instant 4 Friends Access */}
-        {tab === 'friends' && (
-          <div className="bg-white rounded-3xl p-5 border border-[#F3E6EE] shadow-card space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-[#493744] uppercase tracking-wider">
-                Select Your Flower Identity 🌸
-              </span>
-              <span className="text-[10px] text-[#C44780] font-bold bg-[#FFE5EF] px-2 py-0.5 rounded-full">
-                1-Tap Entry
-              </span>
-            </div>
-            <p className="text-[11px] text-[#927F8C] leading-snug">
-              Choose who you are entering as to access our private group chat, wall memories, and bestie quizzes.
-            </p>
-
-            <div className="space-y-2.5 pt-1">
-              {FOUR_FRIENDS.map((friend) => (
-                <button
-                  key={friend.id}
-                  disabled={loading}
-                  onClick={() => handleFriendClick(friend)}
-                  className="w-full p-3 bg-[#FFF8F5] hover:bg-[#FFE5EF] border border-[#F3E6EE] hover:border-[#FFD2E4] rounded-2xl flex items-center justify-between text-left transition-all group disabled:opacity-50"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div
-                      className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm border shrink-0 ${friend.avatarBg}`}
-                    >
-                      {friend.avatarText}
-                    </div>
-                    <div>
-                      <div className="flex items-center space-x-1.5">
-                        <h4 className="text-xs font-bold text-[#493744] group-hover:text-[#C44780] transition-colors">
-                          {friend.name}
-                        </h4>
-                        <span className="text-sm select-none">{friend.flowerEmoji}</span>
-                      </div>
-                      <p className="text-[10px] text-[#C44780] font-semibold">
-                        {friend.flowerTitle}
-                      </p>
-                      <p className="text-[10px] text-[#927F8C] truncate max-w-[180px]">
-                        {friend.email}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-1 text-xs font-bold text-[#C44780] pr-1">
-                    <span className="text-[11px]">Enter</span>
-                    <ArrowRight size={13} className="group-hover:translate-x-0.5 transition-transform" />
-                  </div>
-                </button>
-              ))}
-            </div>
+        {/* Form Container */}
+        <div className="bg-white rounded-3xl p-5 border border-[#F3E6EE] shadow-card space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#493744]">
+              {mode === 'login'
+                ? 'Welcome Back, Bestie 🌸'
+                : mode === 'register'
+                ? 'Register Your Account 🌷'
+                : 'Reset Password ✉️'}
+            </h3>
+            <span className="text-[10px] text-[#C44780] font-bold bg-[#FFE5EF] px-2 py-0.5 rounded-full">
+              Private Access
+            </span>
           </div>
-        )}
 
-        {/* Tab 2: Custom Sign In / Sign Up */}
-        {tab === 'custom' && (
-          <div className="bg-white rounded-3xl p-5 border border-[#F3E6EE] shadow-card space-y-4">
-            <div className="flex rounded-xl bg-[#FFF8F5] p-1 border border-[#F3E6EE]">
-              <button
-                type="button"
-                onClick={() => setCustomMode('login')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  customMode === 'login' ? 'bg-[#C44780] text-white shadow-xs' : 'text-[#927F8C]'
-                }`}
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => setCustomMode('register')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  customMode === 'register' ? 'bg-[#C44780] text-white shadow-xs' : 'text-[#927F8C]'
-                }`}
-              >
-                Create Account
-              </button>
-            </div>
-
-            <form onSubmit={handleCustomSubmit} className="space-y-3">
-              {customMode === 'register' && (
-                <div>
-                  <label className="text-[10px] font-bold text-[#927F8C] uppercase tracking-wider block mb-1">
-                    Your Name
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="e.g. Palak, Priya, Hanshika"
-                      className="w-full py-2.5 pl-9 pr-3 text-xs bg-[#FFF8F5] text-[#493744] border border-[#F3E6EE] rounded-2xl focus:outline-none focus:border-[#C44780]"
-                    />
-                    <User size={15} className="absolute left-3 top-3 text-[#927F8C]" />
-                  </div>
-                </div>
-              )}
-
+          <form onSubmit={handleSubmit} className="space-y-3">
+            {mode === 'register' && (
               <div>
                 <label className="text-[10px] font-bold text-[#927F8C] uppercase tracking-wider block mb-1">
-                  Email Address
+                  Your Name
                 </label>
                 <div className="relative">
                   <input
-                    type="email"
+                    type="text"
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@triobloom.app"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Palak, Priya, Hanshika"
+                    maxLength={50}
                     className="w-full py-2.5 pl-9 pr-3 text-xs bg-[#FFF8F5] text-[#493744] border border-[#F3E6EE] rounded-2xl focus:outline-none focus:border-[#C44780]"
                   />
-                  <Mail size={15} className="absolute left-3 top-3 text-[#927F8C]" />
+                  <User size={15} className="absolute left-3 top-3 text-[#927F8C]" />
                 </div>
               </div>
+            )}
 
+            {mode === 'register' && (
               <div>
                 <label className="text-[10px] font-bold text-[#927F8C] uppercase tracking-wider block mb-1">
-                  Password
+                  Choose Your Flower Vibe 🌸
                 </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {FLOWER_CHOICES.map((fl) => (
+                    <button
+                      type="button"
+                      key={fl.id}
+                      onClick={() => setSelectedFlower(fl.id)}
+                      className={`p-2 rounded-xl text-[11px] font-semibold border text-left transition-all ${
+                        selectedFlower === fl.id
+                          ? 'border-[#C44780] bg-[#FFE5EF] text-[#C44780] shadow-xs'
+                          : 'border-[#F3E6EE] bg-[#FFF8F5] text-[#493744] hover:border-[#FFD2E4]'
+                      }`}
+                    >
+                      {fl.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label className="text-[10px] font-bold text-[#927F8C] uppercase tracking-wider block mb-1">
+                Email Address
+              </label>
+              <div className="relative">
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your-email@example.com"
+                  className="w-full py-2.5 pl-9 pr-3 text-xs bg-[#FFF8F5] text-[#493744] border border-[#F3E6EE] rounded-2xl focus:outline-none focus:border-[#C44780]"
+                />
+                <Mail size={15} className="absolute left-3 top-3 text-[#927F8C]" />
+              </div>
+            </div>
+
+            {mode !== 'reset' && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-bold text-[#927F8C] uppercase tracking-wider">
+                    Password
+                  </label>
+                  {mode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode('reset');
+                        setLocalError(null);
+                        setInfoMessage(null);
+                        clearAuthError();
+                      }}
+                      className="text-[10px] text-[#C44780] font-semibold hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <input
                     type="password"
@@ -235,29 +232,91 @@ export const AuthScreen: React.FC = () => {
                   <Lock size={15} className="absolute left-3 top-3 text-[#927F8C]" />
                 </div>
               </div>
+            )}
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 bg-gradient-to-r from-[#C44780] to-[#B03A70] hover:opacity-95 text-white rounded-2xl text-xs font-bold shadow-soft flex items-center justify-center space-x-1.5 transition-all disabled:opacity-50"
-              >
-                <span>{loading ? 'Entering garden...' : customMode === 'login' ? 'Sign In 🌸' : 'Register Account 🌷'}</span>
-              </button>
-            </form>
+            {mode === 'reset' && (
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setLocalError(null);
+                    setInfoMessage(null);
+                  }}
+                  className="text-[11px] text-[#C44780] font-semibold hover:underline"
+                >
+                  Back to Sign In
+                </button>
+              </div>
+            )}
+
+            {displayError && (
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs space-y-2">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle size={16} className="shrink-0 text-rose-500 mt-0.5" />
+                  <span className="leading-snug">{displayError}</span>
+                </div>
+                {(displayError.includes('network') || displayError.includes('Google') || displayError.includes('pop-up')) && (
+                  <div className="pt-1 flex items-center justify-between border-t border-rose-200/60">
+                    <span className="text-[10px] text-rose-600 font-medium">Tip: Pause ad-blockers / Brave Shields</span>
+                    <button
+                      type="button"
+                      onClick={handleGoogleSignIn}
+                      disabled={googleLoading}
+                      className="px-2.5 py-1 bg-[#C44780] hover:bg-[#B03A70] text-white rounded-xl text-[10px] font-bold shadow-xs transition-colors"
+                    >
+                      Retry Google Sign-In 🔄
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {infoMessage && (
+              <div className="p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs flex items-center space-x-2">
+                <CheckCircle size={15} className="shrink-0 text-emerald-500" />
+                <span className="leading-snug">{infoMessage}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={emailLoading || googleLoading}
+              className="w-full py-2.5 bg-gradient-to-r from-[#C44780] to-[#B03A70] hover:opacity-95 text-white rounded-2xl text-xs font-bold shadow-soft flex items-center justify-center space-x-1.5 transition-all disabled:opacity-50"
+            >
+              <span>
+                {emailLoading
+                  ? 'Verifying...'
+                  : mode === 'login'
+                  ? 'Sign In to Garden'
+                  : mode === 'register'
+                  ? 'Create Member Account'
+                  : 'Send Reset Link'}
+              </span>
+              <ArrowRight size={13} />
+            </button>
+          </form>
+
+          {/* Alternative Google Sign-in */}
+          <div className="pt-2 border-t border-[#F3E6EE]">
+            <button
+              type="button"
+              disabled={googleLoading || emailLoading}
+              onClick={handleGoogleSignIn}
+              className="w-full py-2.5 px-3 bg-[#FFF8F5] hover:bg-[#FFE5EF] border border-[#F3E6EE] rounded-2xl text-xs font-semibold text-[#493744] flex items-center justify-center space-x-2 transition-all disabled:opacity-60"
+            >
+              <span className="text-sm font-bold text-[#C44780]">G</span>
+              <span>{googleLoading ? 'Connecting to Google...' : 'Continue with Google'}</span>
+            </button>
           </div>
-        )}
+        </div>
 
-        {(errorMsg || authError) && (
-          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-xs flex items-center space-x-2">
-            <AlertCircle size={15} className="shrink-0" />
-            <span>{errorMsg || authError}</span>
-          </div>
-        )}
-
-        {/* Security Note */}
-        <div className="p-3 bg-[#FFF8F5] rounded-2xl border border-[#F3E6EE] text-[11px] text-[#927F8C] flex items-center space-x-2">
-          <ShieldCheck size={16} className="text-[#C44780] shrink-0" />
-          <span>Secured by Firebase Firestore rules with isolated private chat.</span>
+        {/* Security & Access Notice */}
+        <div className="p-3 bg-white/80 rounded-2xl border border-[#F3E6EE] text-[11px] text-[#927F8C] flex items-center space-x-2.5 shadow-xs">
+          <ShieldCheck size={18} className="text-[#C44780] shrink-0" />
+          <p className="leading-snug">
+            TrioBloom is restricted to approved members. After registration, your account is verified by the administrator before granting private content access.
+          </p>
         </div>
       </div>
     </div>

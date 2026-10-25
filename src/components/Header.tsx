@@ -1,13 +1,12 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Sparkles, Heart } from 'lucide-react';
 
 interface HeaderProps {
   activeTab: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({ activeTab }) => {
-  const { member, activeFriend, user } = useAuth();
+  const { member, user, isAdmin } = useAuth();
 
   const getTabTitle = () => {
     switch (activeTab) {
@@ -26,8 +25,9 @@ export const Header: React.FC<HeaderProps> = ({ activeTab }) => {
     }
   };
 
-  const displayName = member?.displayName || activeFriend.name;
-  const flowerTag = member?.flowerTag || activeFriend.flowerTitle;
+  const displayName = member?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Bestie';
+  const avatarLetter = displayName[0]?.toUpperCase() || '🌸';
+  const avatarStyle = member?.avatarUrl || 'bg-pink-100 text-pink-600 border-pink-300';
 
   return (
     <header className="sticky top-0 z-30 bg-[#FFF8F5]/90 backdrop-blur-md border-b border-[#F3E6EE] px-4 py-2.5 transition-all">
@@ -42,9 +42,9 @@ export const Header: React.FC<HeaderProps> = ({ activeTab }) => {
               <h1 className="text-base font-bold text-[#493744] tracking-tight leading-none">
                 {getTabTitle()}
               </h1>
-              {activeTab === 'home' && (
+              {isAdmin && (
                 <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-[#FFE5EF] text-[#C44780]">
-                  Private
+                  Admin
                 </span>
               )}
             </div>
@@ -54,13 +54,13 @@ export const Header: React.FC<HeaderProps> = ({ activeTab }) => {
           </div>
         </div>
 
-        {/* Current Active User Pill */}
+        {/* Current Authenticated Member Pill */}
         <div className="flex items-center space-x-2 bg-white/80 border border-[#F3E6EE] rounded-full pl-2 pr-1.5 py-1 shadow-xs">
-          <span className="text-xs font-semibold text-[#493744] truncate max-w-[80px]">
+          <span className="text-xs font-semibold text-[#493744] truncate max-w-[90px]">
             {displayName}
           </span>
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border ${activeFriend.avatarBg}`}>
-            {activeFriend.avatarText}
+          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold border ${avatarStyle}`}>
+            {avatarLetter}
           </div>
         </div>
       </div>

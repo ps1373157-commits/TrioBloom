@@ -7,16 +7,17 @@ import { HelpCircle, CheckCircle2, XCircle, Award, RotateCcw, Sparkles, ChevronR
 import confetti from 'canvas-confetti';
 
 export const QuizScreen: React.FC = () => {
-  const { member, activeFriend, user } = useAuth();
+  const { member, user } = useAuth();
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
   const [answeredState, setAnsweredState] = useState<boolean>(false);
   const [quizFinished, setQuizFinished] = useState<boolean>(false);
   const [personaResult, setPersonaResult] = useState<QuizPersona | null>(null);
   const [finalScore, setFinalScore] = useState<{ score: number; total: number; percentage: number } | null>(null);
+  const [isSavingScore, setIsSavingScore] = useState<boolean>(false);
 
-  const currentUid = user?.uid || activeFriend.id;
-  const currentDisplayName = member?.displayName || activeFriend.name;
+  const currentUid = user?.uid || '';
+  const currentDisplayName = member?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Friend';
 
   const currentQuestion = QUIZ_QUESTIONS[currentIndex];
 
@@ -47,6 +48,9 @@ export const QuizScreen: React.FC = () => {
       setCurrentIndex(prev => prev + 1);
       setAnsweredState(false);
     } else {
+      if (isSavingScore) return;
+      setIsSavingScore(true);
+
       // Calculate final score
       const results = calculateQuizScore(selectedAnswers, QUIZ_QUESTIONS);
       setFinalScore({ score: results.score, total: results.total, percentage: results.percentage });
@@ -56,18 +60,22 @@ export const QuizScreen: React.FC = () => {
 
       // Save score to Firestore
       try {
-        const scoreId = `score_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        await setDoc(doc(db, 'quiz_scores', scoreId), {
-          id: scoreId,
-          userId: currentUid,
-          userName: currentDisplayName,
-          score: results.score,
-          total: results.total,
-          flowerPersona: results.persona.title,
-          createdAt: serverTimestamp()
-        });
+        if (currentUid) {
+          const scoreId = `score_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          await setDoc(doc(db, 'quiz_scores', scoreId), {
+            id: scoreId,
+            userId: currentUid,
+            userName: currentDisplayName,
+            score: results.score,
+            total: results.total,
+            flowerPersona: results.persona.title,
+            createdAt: serverTimestamp()
+          });
+        }
       } catch (err) {
         console.warn('Could not save quiz score (offline or rules):', err);
+      } finally {
+        setIsSavingScore(false);
       }
     }
   };

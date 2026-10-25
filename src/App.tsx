@@ -9,14 +9,12 @@ import { ChatScreen } from './screens/ChatScreen';
 import { ProfileScreen } from './screens/ProfileScreen';
 import { AuthScreen } from './screens/AuthScreen';
 import { PendingApproval } from './components/PendingApproval';
-import { AuthModal } from './components/AuthModal';
-import { FriendPreset } from './constants/friends';
+import { MemberProfile } from './services/firebase';
 
 function MainApp() {
-  const { user, isApproved, loading, isDemoMode } = useAuth();
+  const { user, isApproved, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('home');
-  const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
-  const [chatTargetFriend, setChatTargetFriend] = useState<FriendPreset | null>(null);
+  const [chatTargetMember, setChatTargetMember] = useState<MemberProfile | null>(null);
 
   if (loading) {
     return (
@@ -32,19 +30,19 @@ function MainApp() {
     );
   }
 
-  // Not signed in and not in demo mode: show full AuthScreen (no bottom nav)
-  if (!user && !isDemoMode) {
+  // Not authenticated: always show real AuthScreen (no bottom nav)
+  if (!user) {
     return <AuthScreen />;
   }
 
-  // Signed in but not an approved member: show PendingApproval screen
+  // Authenticated but not an approved circle member: show PendingApproval screen
   if (!isApproved) {
     return <PendingApproval />;
   }
 
-  const handleNavigate = (tab: NavTab, friendTarget?: FriendPreset) => {
-    if (friendTarget) {
-      setChatTargetFriend(friendTarget);
+  const handleNavigate = (tab: NavTab, targetMember?: MemberProfile) => {
+    if (targetMember) {
+      setChatTargetMember(targetMember);
     }
     setActiveTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -62,20 +60,12 @@ function MainApp() {
           {activeTab === 'home' && <HomeScreen onNavigate={handleNavigate} />}
           {activeTab === 'wall' && <WallScreen />}
           {activeTab === 'quiz' && <QuizScreen />}
-          {activeTab === 'chat' && <ChatScreen initialPrivateFriend={chatTargetFriend} />}
-          {activeTab === 'profile' && (
-            <ProfileScreen onOpenAuthModal={() => setAuthModalOpen(true)} />
-          )}
+          {activeTab === 'chat' && <ChatScreen initialTargetMember={chatTargetMember} />}
+          {activeTab === 'profile' && <ProfileScreen />}
         </main>
 
         {/* Fixed Bottom Navigation Bar */}
         <Navigation activeTab={activeTab} onSelectTab={handleNavigate} />
-
-        {/* Auth Modal for profile or switching */}
-        <AuthModal
-          isOpen={authModalOpen}
-          onClose={() => setAuthModalOpen(false)}
-        />
       </div>
     </div>
   );

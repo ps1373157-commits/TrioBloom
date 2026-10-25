@@ -11,15 +11,16 @@ import {
   deleteDoc,
   serverTimestamp,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  increment
 } from 'firebase/firestore';
 import { db, WallPostItem, handleFirestoreError, OperationType } from '../services/firebase';
 import { FLOWER_STICKERS, QUICK_EMOJIS } from '../constants/friends';
 import { formatFriendlyTime, filterPostsBySticker } from '../utils/friendship';
-import { Heart, Trash2, Send, Sparkles, Filter, Smile } from 'lucide-react';
+import { Heart, Trash2, Send, Smile, AlertCircle } from 'lucide-react';
 
 export const WallScreen: React.FC = () => {
-  const { member, activeFriend, user, isAdmin } = useAuth();
+  const { member, user, isAdmin } = useAuth();
   const [posts, setPosts] = useState<WallPostItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [content, setContent] = useState<string>('');
@@ -29,9 +30,9 @@ export const WallScreen: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
 
-  const currentUid = user?.uid || activeFriend.id;
-  const currentDisplayName = member?.displayName || activeFriend.name;
-  const currentAvatar = member?.avatarUrl || activeFriend.avatarBg;
+  const currentUid = user?.uid;
+  const currentDisplayName = member?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Friend';
+  const currentAvatar = member?.avatarUrl || 'bg-pink-100 text-pink-600 border-pink-300';
 
   // Real-time Firestore listener for Wall posts
   useEffect(() => {
@@ -48,7 +49,7 @@ export const WallScreen: React.FC = () => {
         setLoading(false);
       },
       (err) => {
-        console.warn('Wall listener note:', err.message);
+        console.warn('Error fetching wall posts:', err.message);
         setLoading(false);
       }
     );
@@ -56,9 +57,11 @@ export const WallScreen: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Submit memory post
+  // Submit memory post with real Firestore persistence
   const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!currentUid) return;
+
     if (!content.trim()) {
       setErrorMsg('Please write a sweet memory or note before blooming! 🌸');
       return;
@@ -81,74 +84,59 @@ export const WallScreen: React.FC = () => {
       flowerSticker: selectedSticker,
       likesCount: 0,
       likedBy: [],
-      createdAt: new Date(),
-      updatedAt: new Date()
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     };
 
-    // Optimistic UI update
-    setPosts((prev) => [newPost, ...prev]);
-    setContent('');
-    setShowEmojiPicker(false);
-
     try {
-      await setDoc(doc(db, 'wall_posts', postId), {
-        ...newPost,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-    } catch (err) {
-      console.warn('Firestore post save note (using local state):', err);
+      await setDoc(doc(db, 'wall_posts', postId), newPost);
+      setContent('');
+      setShowEmojiPicker(false);
+    } catch (err: any) {
+      console.error('Failed to post memory:', err);
+      try {
+        handleFirestoreError(err, OperationType.CREATE, `wall_posts/${postId}`);
+      } catch (e: any) {
+        setErrorMsg('Could not share memory: ' + (e.message || 'Permission denied'));
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Toggle Heart reaction
+  // Toggle Heart reaction with server-enforced bounds
   const handleToggleLike = async (post: WallPostItem) => {
+    if (!currentUid) return;
     const isLiked = post.likedBy?.includes(currentUid);
     const postRef = doc(db, 'wall_posts', post.id);
-
-    // Optimistic UI reaction update
-    setPosts((prev) =>
-      prev.map((p) => {
-        if (p.id !== post.id) return p;
-        const newLikedBy = isLiked
-          ? (p.likedBy || []).filter((u) => u !== currentUid)
-          : [...(p.likedBy || []), currentUid];
-        const newCount = isLiked
-          ? Math.max(0, (p.likesCount || 1) - 1)
-          : (p.likesCount || 0) + 1;
-        return { ...p, likedBy: newLikedBy, likesCount: newCount };
-      })
-    );
 
     try {
       if (isLiked) {
         await updateDoc(postRef, {
           likedBy: arrayRemove(currentUid),
-          likesCount: Math.max(0, (post.likesCount || 1) - 1),
+          likesCount: increment(-1),
           updatedAt: serverTimestamp()
         });
       } else {
         await updateDoc(postRef, {
           likedBy: arrayUnion(currentUid),
-          likesCount: (post.likesCount || 0) + 1,
+          likesCount: increment(1),
           updatedAt: serverTimestamp()
         });
       }
-    } catch (err) {
-      console.warn('Firestore like update note:', err);
+    } catch (err: any) {
+      console.warn('Error liking post in Firestore:', err.message);
     }
   };
 
   // Delete post (author or admin only)
   const handleDeletePost = async (postId: string, authorId: string) => {
     if (authorId !== currentUid && !isAdmin) return;
-    if (!window.confirm('Are you sure you want to remove this sweet memory? 🌷')) return;
+    if (!window.confirm('Are you sure you want to remove this memory? 🌷')) return;
 
     try {
       await deleteDoc(doc(db, 'wall_posts', postId));
-    } catch (err) {
+    } catch (err: any) {
       try {
         handleFirestoreError(err, OperationType.DELETE, `wall_posts/${postId}`);
       } catch (e: any) {
@@ -181,7 +169,7 @@ export const WallScreen: React.FC = () => {
         <form onSubmit={handleCreatePost} className="space-y-3">
           <div className="flex items-center space-x-2">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border ${currentAvatar}`}>
-              {activeFriend.avatarText}
+              {currentDisplayName ? currentDisplayName[0].toUpperCase() : '🌸'}
             </div>
             <span className="text-xs font-bold text-[#493744]">
               Blooming as <span className="text-[#C44780]">{currentDisplayName}</span>
@@ -248,7 +236,10 @@ export const WallScreen: React.FC = () => {
           {/* Error Banner */}
           {errorMsg && (
             <div className="p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center justify-between">
-              <span>{errorMsg}</span>
+              <div className="flex items-center space-x-1.5">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
               <button
                 type="button"
                 onClick={() => setErrorMsg(null)}
@@ -334,7 +325,7 @@ export const WallScreen: React.FC = () => {
           </div>
         ) : (
           filteredPosts.map((post) => {
-            const isLiked = post.likedBy?.includes(currentUid);
+            const isLiked = currentUid ? post.likedBy?.includes(currentUid) : false;
             const canDelete = post.authorId === currentUid || isAdmin;
 
             return (
@@ -350,7 +341,7 @@ export const WallScreen: React.FC = () => {
                         post.authorAvatar || 'bg-pink-100 text-pink-600 border-pink-300'
                       }`}
                     >
-                      {post.authorName ? post.authorName[0] : '🌸'}
+                      {post.authorName ? post.authorName[0].toUpperCase() : '🌸'}
                     </div>
                     <div>
                       <div className="flex items-center space-x-1.5">
