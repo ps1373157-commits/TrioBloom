@@ -190,8 +190,22 @@
         "text": {
           "type": "string",
           "description": "Message content",
-          "maxLength": 1000,
-          "minLength": 1
+          "maxLength": 1000
+        },
+        "type": {
+          "type": "string",
+          "description": "Message type: text or image",
+          "enum": ["text", "image"]
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Firebase Storage download URL for image attachments",
+          "maxLength": 1000
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Object path in Firebase Storage",
+          "maxLength": 500
         },
         "readBy": {
           "type": "array",
@@ -203,7 +217,76 @@
           "description": "Message creation timestamp"
         }
       },
-      "required": ["id", "conversationId", "senderId", "senderName", "text", "createdAt"]
+      "required": ["id", "conversationId", "senderId", "senderName", "createdAt"]
+    },
+    "Photo": {
+      "title": "Friendship Photo",
+      "description": "Photo uploaded to the friendship photo wall",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Photo ID",
+          "maxLength": 128
+        },
+        "uploaderId": {
+          "type": "string",
+          "description": "UID of uploader",
+          "maxLength": 128
+        },
+        "uploaderName": {
+          "type": "string",
+          "description": "Display name of uploader",
+          "maxLength": 50
+        },
+        "uploaderAvatar": {
+          "type": "string",
+          "description": "Avatar preset or style of uploader",
+          "maxLength": 200
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Firebase Storage object path",
+          "maxLength": 500
+        },
+        "downloadUrl": {
+          "type": "string",
+          "description": "Firebase Storage download URL",
+          "maxLength": 1000
+        },
+        "caption": {
+          "type": "string",
+          "description": "Optional photo caption",
+          "maxLength": 500
+        },
+        "aspectRatio": {
+          "type": "number",
+          "description": "Width to height aspect ratio for smooth layout"
+        },
+        "fileSize": {
+          "type": "number",
+          "description": "File size in bytes"
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "MIME type (image/jpeg, image/png, image/webp)",
+          "maxLength": 50
+        },
+        "likesCount": {
+          "type": "number",
+          "description": "Number of hearts received"
+        },
+        "likedBy": {
+          "type": "array",
+          "description": "Array of UIDs who liked this photo"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Upload timestamp"
+        }
+      },
+      "required": ["id", "uploaderId", "uploaderName", "storagePath", "downloadUrl", "createdAt"]
     },
     "QuizScore": {
       "title": "Quiz Result",
@@ -255,6 +338,10 @@
     "/wall_posts/{postId}": {
       "schema": "WallPost",
       "description": "Friendship memories, stories, and reactions"
+    },
+    "/photos/{photoId}": {
+      "schema": "Photo",
+      "description": "Shared photo memories in the Photo Wall"
     },
     "/conversations/{conversationId}": {
       "schema": "Conversation",

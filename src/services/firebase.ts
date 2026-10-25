@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { getStorage } from 'firebase/storage';
 import {
   getFirestore,
   doc,
@@ -15,6 +16,10 @@ const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 // CRITICAL: The app will break without specifying firestoreDatabaseId
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
+// Set timeout so network / bucket-not-found errors reject within 15 seconds instead of 10-minute freeze
+storage.maxUploadRetryTime = 15000;
+storage.maxOperationRetryTime = 15000;
 
 export { Timestamp, serverTimestamp };
 
@@ -120,8 +125,29 @@ export interface ChatMessageItem {
   senderId: string;
   senderName: string;
   senderAvatar: string;
+  type?: 'text' | 'image';
   text: string;
+  imageUrl?: string;
+  storagePath?: string;
+  imageWidth?: number;
+  imageHeight?: number;
   readBy?: string[];
+  createdAt?: any;
+}
+
+export interface PhotoItem {
+  id: string;
+  uploaderId: string;
+  uploaderName: string;
+  uploaderAvatar?: string;
+  storagePath: string;
+  downloadUrl: string;
+  caption?: string;
+  aspectRatio?: number;
+  fileSize: number;
+  mimeType: string;
+  likesCount?: number;
+  likedBy?: string[];
   createdAt?: any;
 }
 

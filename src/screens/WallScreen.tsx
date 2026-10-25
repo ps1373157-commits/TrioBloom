@@ -17,10 +17,16 @@ import {
 import { db, WallPostItem, handleFirestoreError, OperationType } from '../services/firebase';
 import { FLOWER_STICKERS, QUICK_EMOJIS } from '../constants/friends';
 import { formatFriendlyTime, filterPostsBySticker } from '../utils/friendship';
-import { Heart, Trash2, Send, Smile, AlertCircle } from 'lucide-react';
+import { Heart, Trash2, Send, Smile, AlertCircle, Camera, Sparkles } from 'lucide-react';
+import { PhotoWall } from '../components/PhotoWall';
 
-export const WallScreen: React.FC = () => {
+interface WallScreenProps {
+  initialView?: 'notes' | 'photos';
+}
+
+export const WallScreen: React.FC<WallScreenProps> = ({ initialView = 'notes' }) => {
   const { member, user, isAdmin } = useAuth();
+  const [wallTab, setWallTab] = useState<'notes' | 'photos'>(initialView);
   const [posts, setPosts] = useState<WallPostItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [content, setContent] = useState<string>('');
@@ -29,6 +35,12 @@ export const WallScreen: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (initialView) {
+      setWallTab(initialView);
+    }
+  }, [initialView]);
 
   const currentUid = user?.uid;
   const currentDisplayName = member?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Friend';
@@ -149,20 +161,50 @@ export const WallScreen: React.FC = () => {
 
   return (
     <div className="space-y-4 pb-6">
-      {/* Wall Header Banner */}
-      <div className="bg-gradient-to-r from-[#FFE5EF] via-[#FFF5F8] to-[#F0E8FF] rounded-3xl p-4 border border-[#FFD2E4] shadow-soft">
-        <div className="flex items-center space-x-2.5">
-          <span className="text-2xl select-none animate-petal">🌸</span>
-          <div>
-            <h2 className="text-base font-bold text-[#493744]">
-              Friendship Wall
-            </h2>
-            <p className="text-xs text-[#927F8C]">
-              Leave loving notes, core memories & daily smiles for the four of us 🌷
-            </p>
-          </div>
-        </div>
+      {/* Top Segmented View Switcher */}
+      <div className="grid grid-cols-2 gap-1.5 bg-[#FFF0F6] p-1.5 rounded-2xl border border-[#FFD2E4]">
+        <button
+          onClick={() => setWallTab('notes')}
+          className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-1.5 ${
+            wallTab === 'notes'
+              ? 'bg-[#C44780] text-white shadow-xs'
+              : 'text-[#927F8C] hover:text-[#493744]'
+          }`}
+        >
+          <span>🌸</span>
+          <span>Memory Notes</span>
+        </button>
+        <button
+          onClick={() => setWallTab('photos')}
+          className={`py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-1.5 ${
+            wallTab === 'photos'
+              ? 'bg-[#C44780] text-white shadow-xs'
+              : 'text-[#927F8C] hover:text-[#493744]'
+          }`}
+        >
+          <span>📸</span>
+          <span>Photo Wall</span>
+        </button>
       </div>
+
+      {wallTab === 'photos' ? (
+        <PhotoWall />
+      ) : (
+        <>
+          {/* Wall Header Banner */}
+          <div className="bg-gradient-to-r from-[#FFE5EF] via-[#FFF5F8] to-[#F0E8FF] rounded-3xl p-4 border border-[#FFD2E4] shadow-soft">
+            <div className="flex items-center space-x-2.5">
+              <span className="text-2xl select-none animate-petal">🌸</span>
+              <div>
+                <h2 className="text-base font-bold text-[#493744]">
+                  Friendship Wall
+                </h2>
+                <p className="text-xs text-[#927F8C]">
+                  Leave loving notes, core memories & daily smiles for the four of us 🌷
+                </p>
+              </div>
+            </div>
+          </div>
 
       {/* Composer Card */}
       <div className="bg-white rounded-3xl p-4 border border-[#F3E6EE] shadow-soft">
@@ -405,6 +447,8 @@ export const WallScreen: React.FC = () => {
           })
         )}
       </div>
+        </>
+      )}
     </div>
   );
 };

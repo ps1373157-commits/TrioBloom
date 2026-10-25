@@ -13,18 +13,37 @@ import {
 } from 'firebase/firestore';
 import {
   db,
+  storage,
   ChatMessageItem,
   MemberProfile,
   handleFirestoreError,
   OperationType
 } from '../services/firebase';
 import {
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject
+} from 'firebase/storage';
+import {
+  validateImageFile,
+  processAndCompressImage,
+  downloadPhoto
+} from '../utils/imageHelper';
+import { parseStorageError, checkStorageBucketHealth } from '../utils/storageErrorHelper';
+import {
   Send,
   Smile,
   Users,
   User,
   ShieldAlert,
-  Sparkles
+  Sparkles,
+  Image as ImageIcon,
+  Camera,
+  Download,
+  X,
+  Loader2,
+  Maximize2
 } from 'lucide-react';
 import { QUICK_EMOJIS } from '../constants/friends';
 
@@ -46,8 +65,23 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ initialTargetMember }) =
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState<boolean>(false);
 
+  // Image message states
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageCaption, setImageCaption] = useState<string>('');
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [isUploadingImage, setIsUploadingImage] = useState<boolean>(false);
+  const [activePhotoModal, setActivePhotoModal] = useState<{
+    url: string;
+    caption?: string;
+    sender: string;
+    time?: any;
+  } | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const activeChatUploadTaskRef = useRef<any>(null);
 
   const currentUid = user?.uid;
   const currentDisplayName = member?.displayName || user?.displayName || user?.email?.split('@')[0] || 'Friend';
@@ -212,6 +246,165 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ initialTargetMember }) =
     }
   };
 
+  const handleSelectImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorMsg(null);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      setErrorMsg(validation.error || 'Invalid file');
+      return;
+    }
+
+    setSelectedImageFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setImagePreviewUrl(objectUrl);
+  };
+
+  const handleCancelImageAttachment = () => {
+    if (isUploadingImage && activeChatUploadTaskRef.current) {
+      try {
+        activeChatUploadTaskRef.current.cancel();
+      } catch (e) {
+        console.warn('Chat upload cancel note:', e);
+      }
+    }
+    activeChatUploadTaskRef.current = null;
+    setSelectedImageFile(null);
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(null);
+    }
+    setImageCaption('');
+    setUploadProgress(0);
+    setIsUploadingImage(false);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  };
+
+  const handleSendImageMessage = async () => {
+    if (!selectedImageFile || !currentUid || !conversationId || isUploadingImage) return;
+
+    setIsUploadingImage(true);
+    setErrorMsg(null);
+    setUploadProgress(5);
+
+    let storagePath = '';
+    let storageRef: any = null;
+
+    try {
+      // Fast check: verify Firebase Storage bucket is initialized
+      await checkStorageBucketHealth();
+
+      // Step 1: Compress image
+      const processed = await processAndCompressImage(selectedImageFile);
+      setUploadProgress(15);
+
+      const timestamp = Date.now();
+      const sanitizedName = selectedImageFile.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      storagePath = `chat/${conversationId}/${currentUid}/${timestamp}_${sanitizedName}`;
+      storageRef = ref(storage, storagePath);
+
+      // Step 2: Upload bytes with real progress
+      const uploadTask = uploadBytesResumable(storageRef, processed.blob, {
+        contentType: processed.mimeType
+      });
+      activeChatUploadTaskRef.current = uploadTask;
+
+      uploadTask.on(
+        'state_changed',
+        (snapshot) => {
+          if (snapshot.totalBytes > 0) {
+            const byteRatio = snapshot.bytesTransferred / snapshot.totalBytes;
+            const progress = Math.min(70, Math.round(byteRatio * 70));
+            setUploadProgress(15 + progress);
+          }
+        },
+        (storageErr) => {
+          console.warn('[Chat uploadTask state_changed error]:', storageErr.code, storageErr.message);
+        }
+      );
+
+      // Await uploadTask Promise
+      await uploadTask;
+      activeChatUploadTaskRef.current = null;
+      setUploadProgress(88);
+
+      // Step 3: Get permanent download URL
+      const downloadUrl = await getDownloadURL(storageRef);
+      setUploadProgress(94);
+
+      // Step 4: Write message and update conversation
+      const messageId = `msg_${timestamp}_${Math.random().toString(36).substring(2, 6)}`;
+      const msgRef = doc(db, 'conversations', conversationId, 'messages', messageId);
+
+      const convRef = doc(db, 'conversations', conversationId);
+      const participantIds =
+        chatType === 'group'
+          ? []
+          : selectedFriend
+          ? [currentUid, selectedFriend.uid]
+          : [currentUid];
+
+      await setDoc(
+        convRef,
+        {
+          id: conversationId,
+          type: chatType,
+          participantIds,
+          lastMessage: imageCaption.trim() ? `📷 ${imageCaption.trim()}` : '📷 Photo',
+          lastMessageSender: currentDisplayName,
+          lastMessageAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+
+      const newMsg: ChatMessageItem = {
+        id: messageId,
+        conversationId,
+        senderId: currentUid,
+        senderName: currentDisplayName,
+        senderAvatar: currentAvatar,
+        type: 'image',
+        text: imageCaption.trim() || 'Photo snapshot',
+        imageUrl: downloadUrl,
+        storagePath,
+        imageWidth: processed.width,
+        imageHeight: processed.height,
+        createdAt: serverTimestamp()
+      };
+
+      try {
+        await setDoc(msgRef, newMsg);
+      } catch (dbErr: any) {
+        // Rollback orphaned Storage object if metadata save fails
+        console.error('Chat message metadata write failed, rolling back storage file:', dbErr);
+        if (storageRef) {
+          try {
+            await deleteObject(storageRef);
+          } catch (cleanupErr) {
+            console.warn('Chat storage cleanup rollback note:', cleanupErr);
+          }
+        }
+        throw new Error(`Failed to deliver photo message: ${dbErr.message || 'Permission denied'}`);
+      }
+
+      setUploadProgress(100);
+      handleCancelImageAttachment();
+    } catch (err: any) {
+      activeChatUploadTaskRef.current = null;
+      const parsed = parseStorageError(err);
+      setErrorMsg(parsed.userMessage);
+      setUploadProgress(0);
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-[calc(100vh-130px)] max-h-[820px] bg-white rounded-3xl border border-[#F3E6EE] shadow-card overflow-hidden">
       {/* Chat Sub-Navigation Bar */}
@@ -349,24 +542,56 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ initialTargetMember }) =
                 )}
 
                 <div
-                  className={`max-w-[78%] rounded-2xl p-3 shadow-xs transition-all ${
+                  className={`max-w-[78%] rounded-2xl p-2.5 shadow-xs transition-all ${
                     isMe
                       ? 'bg-gradient-to-br from-[#C44780] to-[#AD376E] text-white rounded-br-xs'
                       : 'bg-white text-[#493744] border border-[#F3E6EE] rounded-bl-xs'
                   }`}
                 >
                   {!isMe && chatType === 'group' && (
-                    <p className="text-[10px] font-bold text-[#C44780] mb-0.5">
+                    <p className="text-[10px] font-bold text-[#C44780] mb-1 px-1">
                       {msg.senderName}
                     </p>
                   )}
 
-                  <p className="text-xs leading-relaxed whitespace-pre-wrap break-words">
-                    {msg.text}
-                  </p>
+                  {msg.type === 'image' && msg.imageUrl ? (
+                    <div className="space-y-1.5">
+                      <div
+                        onClick={() =>
+                          setActivePhotoModal({
+                            url: msg.imageUrl!,
+                            caption: msg.text !== 'Photo snapshot' ? msg.text : undefined,
+                            sender: msg.senderName,
+                            time: msg.createdAt
+                          })
+                        }
+                        className="relative rounded-xl overflow-hidden bg-black/10 cursor-pointer group max-h-60"
+                      >
+                        <img
+                          src={msg.imageUrl}
+                          alt={msg.text || 'Photo attachment'}
+                          loading="lazy"
+                          className="w-full h-auto object-cover rounded-xl transition-transform group-hover:scale-102"
+                        />
+                        <div className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Maximize2 size={12} />
+                        </div>
+                      </div>
+
+                      {msg.text && msg.text !== 'Photo snapshot' && (
+                        <p className="text-xs leading-relaxed px-1 whitespace-pre-wrap break-words">
+                          {msg.text}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs leading-relaxed px-1 whitespace-pre-wrap break-words">
+                      {msg.text}
+                    </p>
+                  )}
 
                   <div
-                    className={`flex items-center justify-end space-x-1 mt-1 text-[9px] ${
+                    className={`flex items-center justify-end space-x-1 mt-1 text-[9px] px-1 ${
                       isMe ? 'text-pink-100' : 'text-[#927F8C]'
                     }`}
                   >
@@ -407,10 +632,103 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ initialTargetMember }) =
         </div>
       )}
 
+      {/* Image Attachment Preview Tray */}
+      {imagePreviewUrl && (
+        <div className="p-3 bg-[#FFE5EF]/60 border-t border-[#FFD2E4] shrink-0 space-y-2">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center space-x-2.5">
+              <div className="w-14 h-14 rounded-xl overflow-hidden bg-black/10 shrink-0 border border-[#FFD2E4]">
+                <img
+                  src={imagePreviewUrl}
+                  alt="Attachment preview"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-[#493744]">
+                  Photo Attachment
+                </p>
+                <input
+                  type="text"
+                  value={imageCaption}
+                  onChange={(e) => setImageCaption(e.target.value)}
+                  disabled={isUploadingImage}
+                  placeholder="Add an optional caption... 🌸"
+                  maxLength={500}
+                  className="mt-1 w-full py-1 px-2.5 text-xs bg-white text-[#493744] border border-[#F3E6EE] rounded-xl focus:outline-none focus:border-[#C44780]"
+                />
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCancelImageAttachment}
+              disabled={isUploadingImage}
+              className="p-1 rounded-full text-[#927F8C] hover:bg-[#FFE5EF] transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {isUploadingImage && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] font-bold text-[#C44780]">
+                <span>Sending photo...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-white h-1.5 rounded-full overflow-hidden border border-[#FFD2E4]">
+                <div
+                  className="bg-gradient-to-r from-[#C44780] to-[#E580B2] h-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end space-x-2">
+            <button
+              type="button"
+              onClick={handleCancelImageAttachment}
+              disabled={isUploadingImage}
+              className="py-1 px-3 bg-white text-[#493744] hover:bg-gray-100 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSendImageMessage}
+              disabled={isUploadingImage}
+              className="py-1 px-3.5 bg-[#C44780] hover:bg-[#B03A70] text-white rounded-xl text-xs font-bold shadow-xs flex items-center space-x-1 transition-colors disabled:opacity-50"
+            >
+              {isUploadingImage ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  <span>Sending...</span>
+                </>
+              ) : (
+                <>
+                  <Send size={12} />
+                  <span>Send Photo</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden file input for chat image attachment */}
+      <input
+        type="file"
+        ref={imageInputRef}
+        accept="image/jpeg,image/png,image/webp,image/jpg"
+        onChange={handleSelectImageFile}
+        className="hidden"
+      />
+
       {/* Bottom Message Composer */}
       <form
         onSubmit={handleSendMessage}
-        className="p-3 bg-[#FFF8F5] border-t border-[#F3E6EE] flex items-center space-x-2 shrink-0 safe-pb"
+        className="p-2.5 bg-[#FFF8F5] border-t border-[#F3E6EE] flex items-center space-x-1.5 shrink-0 safe-pb"
       >
         <button
           type="button"
@@ -418,7 +736,19 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ initialTargetMember }) =
           aria-label="Insert emoji"
           className="p-2 text-[#927F8C] hover:text-[#C44780] hover:bg-[#FFE5EF] rounded-xl transition-colors shrink-0"
         >
-          <Smile size={20} />
+          <Smile size={19} />
+        </button>
+
+        {/* Image Attachment Button */}
+        <button
+          type="button"
+          onClick={() => imageInputRef.current?.click()}
+          disabled={!conversationId || isUploadingImage}
+          aria-label="Attach photo"
+          title="Share photo"
+          className="p-2 text-[#927F8C] hover:text-[#C44780] hover:bg-[#FFE5EF] rounded-xl transition-colors shrink-0 disabled:opacity-50"
+        >
+          <ImageIcon size={19} />
         </button>
 
         <textarea
@@ -447,6 +777,61 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({ initialTargetMember }) =
           <Send size={16} />
         </button>
       </form>
+
+      {/* Chat Photo Lightbox Modal */}
+      {activePhotoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/90 backdrop-blur-md">
+          <div className="relative max-w-md w-full bg-[#1A1418] rounded-3xl overflow-hidden border border-white/10 flex flex-col max-h-[90vh]">
+            <div className="p-3.5 flex items-center justify-between bg-black/40 border-b border-white/10 text-white">
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">
+                  Sent by {activePhotoModal.sender}
+                </p>
+                <p className="text-[10px] text-white/60">
+                  {formatFriendlyTime(activePhotoModal.time)}
+                </p>
+              </div>
+
+              <div className="flex items-center space-x-1.5">
+                <button
+                  onClick={() =>
+                    downloadPhoto(
+                      activePhotoModal.url,
+                      `chat_memory_${Date.now()}.jpg`
+                    )
+                  }
+                  title="Download photo"
+                  className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
+                >
+                  <Download size={16} />
+                </button>
+                <button
+                  onClick={() => setActivePhotoModal(null)}
+                  className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 flex items-center justify-center p-2 bg-black/60 overflow-hidden">
+              <img
+                src={activePhotoModal.url}
+                alt={activePhotoModal.caption || 'Chat photo'}
+                className="max-h-[60vh] max-w-full object-contain rounded-xl select-none"
+              />
+            </div>
+
+            {activePhotoModal.caption && (
+              <div className="p-3.5 bg-black/50 border-t border-white/10 text-white text-xs">
+                <p className="italic text-white/90">
+                  "{activePhotoModal.caption}"
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

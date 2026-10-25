@@ -133,10 +133,10 @@ service cloud.firestore {
           (conversationId != 'group_triobloom' && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
         );
         allow create: if isSignedIn() && isValidId(messageId) &&
-          incoming().senderId == request.auth.uid &&
-          incoming().text is string &&
-          incoming().text.size() >= 1 &&
-          incoming().text.size() <= 1000 && (
+          incoming().senderId == request.auth.uid && (
+            (incoming().text is string && incoming().text.size() >= 1 && incoming().text.size() <= 1000) ||
+            (incoming().type == 'image' && incoming().imageUrl is string && incoming().imageUrl.size() <= 1000)
+          ) && (
             (conversationId == 'group_triobloom' && isCurrentApprovedMember()) ||
             (conversationId != 'group_triobloom' && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds)
           );
@@ -150,6 +150,29 @@ service cloud.firestore {
           existing().senderId == request.auth.uid || isAdmin()
         );
       }
+    }
+
+    // Photo Wall: shared memories uploaded by approved members
+    match /photos/{photoId} {
+      allow get, list: if isSignedIn() && isCurrentApprovedMember();
+      allow create: if isSignedIn() && isValidId(photoId) && isCurrentApprovedMember() &&
+        incoming().uploaderId == request.auth.uid &&
+        incoming().downloadUrl is string &&
+        incoming().downloadUrl.size() <= 1000 &&
+        incoming().storagePath is string &&
+        incoming().storagePath.size() <= 500 &&
+        (!('caption' in incoming()) || (incoming().caption is string && incoming().caption.size() <= 500));
+      allow update: if isSignedIn() && isValidId(photoId) && isCurrentApprovedMember() && (
+        // Action 1: Like/heart toggle by approved member
+        (incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy', 'updatedAt']) &&
+         incoming().uploaderId == existing().uploaderId &&
+         incoming().downloadUrl == existing().downloadUrl) ||
+        // Action 2: Uploader updates caption
+        (existing().uploaderId == request.auth.uid &&
+         incoming().uploaderId == request.auth.uid &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['caption', 'updatedAt']))
+      );
+      allow delete: if isSignedIn() && isValidId(photoId) && (existing().uploaderId == request.auth.uid || isAdmin());
     }
 
     // Quiz Scores: only approved members can read and create; user ID must match auth UID

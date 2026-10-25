@@ -15,6 +15,7 @@ function MainApp() {
   const { user, isApproved, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [chatTargetMember, setChatTargetMember] = useState<MemberProfile | null>(null);
+  const [wallView, setWallView] = useState<'notes' | 'photos'>('notes');
 
   if (loading) {
     return (
@@ -40,9 +41,12 @@ function MainApp() {
     return <PendingApproval />;
   }
 
-  const handleNavigate = (tab: NavTab, targetMember?: MemberProfile) => {
+  const handleNavigate = (tab: NavTab, targetMember?: MemberProfile, extraParam?: string) => {
     if (targetMember) {
       setChatTargetMember(targetMember);
+    }
+    if (tab === 'wall') {
+      setWallView(extraParam === 'photos' ? 'photos' : 'notes');
     }
     setActiveTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -58,7 +62,7 @@ function MainApp() {
         {/* Dynamic Screen Viewport */}
         <main className="flex-1 p-3.5 pb-20 overflow-y-auto">
           {activeTab === 'home' && <HomeScreen onNavigate={handleNavigate} />}
-          {activeTab === 'wall' && <WallScreen />}
+          {activeTab === 'wall' && <WallScreen initialView={wallView} />}
           {activeTab === 'quiz' && <QuizScreen />}
           {activeTab === 'chat' && <ChatScreen initialTargetMember={chatTargetMember} />}
           {activeTab === 'profile' && <ProfileScreen />}
